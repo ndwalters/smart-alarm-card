@@ -56,11 +56,52 @@ const ARM_SERVICE = {
   custom_bypass: "alarm_arm_custom_bypass",
 };
 
-// Default icon + active/inactive labels per zone type
+// Icon shown on the ring button and in the arm-mode picker, per alarm state
+const ARM_ICONS = {
+  disarmed: "mdi:shield-off",
+  armed_home: "mdi:shield-home",
+  armed_away: "mdi:shield-lock",
+  armed_night: "mdi:shield-moon",
+  armed_vacation: "mdi:shield-airplane",
+  armed_custom_bypass: "mdi:shield-check",
+  triggered: "mdi:shield-alert",
+  pending: "mdi:shield-refresh",
+  arming: "mdi:shield-refresh",
+  disarming: "mdi:shield-refresh",
+};
+
+// Same icons, keyed by the arm_modes config values (home/away/night/vacation/custom_bypass)
+const ARM_MODE_ICONS = {
+  home: "mdi:shield-home",
+  away: "mdi:shield-lock",
+  night: "mdi:shield-moon",
+  vacation: "mdi:shield-airplane",
+  custom_bypass: "mdi:shield-check",
+};
+
+// Default icon + active/inactive labels per zone type (used as a fallback only ---
+// the entity's own icon / device_class is preferred, see _zoneIcon())
 const ZONE_TYPES = {
   door: { icon: "mdi:door", activeLabel: "Open", inactiveLabel: "Closed" },
   window: { icon: "mdi:window-closed-variant", activeLabel: "Open", inactiveLabel: "Closed" },
   motion: { icon: "mdi:motion-sensor", activeLabel: "Motion", inactiveLabel: "Clear" },
+};
+
+// Mirrors Home Assistant's default binary_sensor device_class icons (on/off)
+const DEVICE_CLASS_ICONS = {
+  door: { on: "mdi:door-open", off: "mdi:door-closed" },
+  garage_door: { on: "mdi:garage-open", off: "mdi:garage" },
+  window: { on: "mdi:window-open", off: "mdi:window-closed" },
+  opening: { on: "mdi:door-open", off: "mdi:door-closed" },
+  motion: { on: "mdi:motion-sensor", off: "mdi:motion-sensor-off" },
+  moving: { on: "mdi:arrow-right", off: "mdi:stop" },
+  occupancy: { on: "mdi:home", off: "mdi:home-outline" },
+  presence: { on: "mdi:home", off: "mdi:home-outline" },
+  safety: { on: "mdi:alert", off: "mdi:check-circle" },
+  smoke: { on: "mdi:smoke-detector-variant-alert", off: "mdi:smoke-detector-variant" },
+  gas: { on: "mdi:alert-circle", off: "mdi:check-circle" },
+  vibration: { on: "mdi:vibrate", off: "mdi:crop-portrait" },
+  lock: { on: "mdi:lock-open-outline", off: "mdi:lock-outline" },
 };
 
 function ha(iconStr, opts = {}) {
@@ -139,11 +180,19 @@ class SmartAlarmCard extends HTMLElement {
   }
 
   _ringIcon(state) {
-    if (state === "disarmed") return "mdi:lock-open-outline";
-    if (state === "triggered") return "mdi:alert-outline";
-    if (state === "pending" || state === "arming" || state === "disarming") return "mdi:timer-lock-outline";
-    if (state && state.startsWith("armed_")) return "mdi:lock-outline";
-    return "mdi:lock-question";
+    return ARM_ICONS[state] || "mdi:shield-outline";
+  }
+
+  // Resolve a zone's icon: explicit config override > the entity's own icon
+  // (respects any custom icon set in HA) > device_class default > type default.
+  _zoneIcon(zone, stateObj, isActive) {
+    if (zone.icon) return zone.icon;
+    if (stateObj?.attributes?.icon) return stateObj.attributes.icon;
+    const deviceClass = stateObj?.attributes?.device_class;
+    const dcIcons = DEVICE_CLASS_ICONS[deviceClass];
+    if (dcIcons) return isActive ? dcIcons.on : dcIcons.off;
+    const typeInfo = ZONE_TYPES[zone.type] || ZONE_TYPES.door;
+    return typeInfo.icon;
   }
 
   _statusText(state) {
@@ -333,7 +382,7 @@ class SmartAlarmCard extends HTMLElement {
           const zs = this._hass.states[z.entity];
           const typeInfo = ZONE_TYPES[z.type] || ZONE_TYPES.door;
           const isActive = zs?.state === "on";
-          const icon = z.icon || typeInfo.icon;
+          const icon = this._zoneIcon(z, zs, isActive);
           const color = isActive ? "#e53935" : "#4caf1c";
           return `
             <div class="row" data-zone-index="${i}">
@@ -379,7 +428,12 @@ class SmartAlarmCard extends HTMLElement {
           <div class="overlay-close" id="overlay-close">${ha("mdi:close", { size: 22 })}</div>
           <div class="overlay-title">Arm System</div>
           <div class="arm-choice-btns">
-            ${this.config.arm_modes.map((m) => `<div class="arm-choice-btn" data-mode="${m}">${m.replace("_", " ")}</div>`).join("")}
+            ${this.config.arm_modes.map((m) => `
+              <div class="arm-choice-btn" data-mode="${m}">
+                ${ha(ARM_MODE_ICONS[m] || "mdi:shield-lock", { size: 26 })}
+                <span>${m.replace("_", " ")}</span>
+              </div>
+            `).join("")}
           </div>
         </div>
       `;
@@ -538,14 +592,15 @@ class SmartAlarmCard extends HTMLElement {
       }
       .overlay-close { position: absolute; top: 14px; right: 14px; cursor: pointer; opacity: 0.6; color: #fff; }
       .overlay-title { font-size: 15px; letter-spacing: 0.5px; opacity: 0.75; margin-bottom: 18px; }
-      .arm-choice-btns { display: flex; gap: 12px; }
+      .arm-choice-btns { display: flex; gap: 14px; }
       .arm-choice-btn {
-        padding: 14px 22px; border-radius: 10px;
+        display: flex; flex-direction: column; align-items: center; gap: 8px;
+        padding: 16px 20px; border-radius: 12px; min-width: 84px;
         background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18);
-        color: #fff; font-size: 14px; font-weight: 600; letter-spacing: 0.5px;
+        color: #fff; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;
         cursor: pointer; text-transform: capitalize;
       }
-      .arm-choice-btn.danger { background: rgba(229,57,53,0.25); border-color: #e53935; }
+      .arm-choice-btn.danger { background: rgba(229,57,53,0.25); border-color: #e53935; flex-direction: row; }
       .arm-choice-btn:active { background: rgba(255,255,255,0.18); }
       .pin-dots { display: flex; gap: 10px; margin-bottom: 20px; height: 14px; }
       .pin-dot { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,0.5); }
