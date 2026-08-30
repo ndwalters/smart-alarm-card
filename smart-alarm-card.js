@@ -1,10 +1,10 @@
 /**
  * Smart-Alarm-Card for Home Assistant
  * -----------------------------------------------------
- * A custom Lovelace card styled after the Control4 security panel:
- * a dark full-bleed panel with a title bar, a Status / Zones / History
- * tab strip, a large circular arm/disarm button with a colour-coded
- * ring, an Emergency button, a Locks button, and an on-card PIN keypad.
+ * A Home Assistant alarm card styled for a more modern looking security
+ * panel: a dark title bar, Status / Zones / History tabs, a large
+ * Arm/Disarm ring button, Emergency function, Lock buttons, and an
+ * on-card PIN keypad.
  *
  * All icons are real Material Design Icons rendered via <ha-icon>,
  * which is already available globally inside the Home Assistant frontend.
@@ -116,7 +116,9 @@ class SmartAlarmCard extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._tab = "status"; // status | zones | history
-    this._overlay = null; // null | 'arm-select' | 'keypad' | 'emergency' | 'locks'
+    this._overlay = null; // null | 'arm-select' | 'keypad' | 'emergency' | 'locks' | 'lock-confirm'
+    this._pickerMode = null; // 'arm' | 'disarm' — which tiles the arm-select overlay shows
+    this._pendingLock = null; // entity_id awaiting lock/unlock confirmation
     this._enteredCode = "";
     this._pendingService = null;
     this._error = false;
@@ -141,13 +143,25 @@ class SmartAlarmCard extends HTMLElement {
   }
 
   set hass(hass) {
-    const prev = this._hass ? this._hass.states[this.config.entity] : undefined;
+    const prevHass = this._hass;
+    const prev = prevHass ? prevHass.states[this.config.entity] : undefined;
     this._hass = hass;
     const cur = this._stateObj();
     if (prev && cur && prev.state !== cur.state) {
       this._lastMessage = `State is now: ${cur.state.toUpperCase()}`;
     }
+    if (!this._relevantStateChanged(prevHass, hass)) return;
     this._render();
+  }
+
+  // HA replaces a state object's reference only when that entity actually
+  // changes, so a reference check here is a cheap way to skip re-rendering
+  // (and rebuilding the whole shadow DOM) on unrelated state updates.
+  _relevantStateChanged(prevHass, hass) {
+    if (!prevHass) return true;
+    const entities = [this.config.entity, ...this.config.zones.map((z) => z.entity)];
+    if (this.config.lock) entities.push(this.config.lock.entity);
+    return entities.some((id) => prevHass.states[id] !== hass.states[id]);
   }
 
   getCardSize() {
@@ -214,11 +228,14 @@ class SmartAlarmCard extends HTMLElement {
       if (this.config.arm_modes.length === 1) {
         this._startAction(ARM_SERVICE[this.config.arm_modes[0]]);
       } else {
+        this._pickerMode = "arm";
         this._overlay = "arm-select";
         this._render();
       }
     } else {
-      this._startAction("alarm_disarm");
+      this._pickerMode = "disarm";
+      this._overlay = "arm-select";
+      this._render();
     }
   }
 
@@ -284,11 +301,21 @@ class SmartAlarmCard extends HTMLElement {
     this._closeOverlay();
   }
 
-  _toggleLock(entityId) {
+  _confirmLock(entityId) {
+    this._pendingLock = entityId;
+    this._overlay = "lock-confirm";
+    this._render();
+  }
+
+  _toggleLockConfirmed() {
+    const entityId = this._pendingLock;
+    if (!entityId) return;
     const lockState = this._hass.states[entityId]?.state;
     this._hass.callService("lock", lockState === "locked" ? "unlock" : "lock", {
       entity_id: entityId,
     });
+    this._pendingLock = null;
+    this._closeOverlay();
   }
 
   _moreInfo(entityId) {
@@ -361,7 +388,7 @@ class SmartAlarmCard extends HTMLElement {
           <div class="side-label">Emergency</div>
         </div>
 
-        <div class="ring-btn" id="ring-btn">${ha(this._ringIcon(state), { size: 56 })}</div>
+        <div class="ring-btn" id="ring-btn">${ha(this._ringIcon(state), { size: 56, color: ring })}</div>
 
         <div class="side-btn" id="locks-btn">
           <div class="side-icon">${ha("mdi:lock-outline", { size: 28 })}</div>
@@ -423,15 +450,19 @@ class SmartAlarmCard extends HTMLElement {
 
   _renderOverlay() {
     if (this._overlay === "arm-select") {
+      const isDisarm = this._pickerMode === "disarm";
+      const tiles = isDisarm
+        ? [{ mode: "disarm", label: "disarm", icon: ARM_ICONS.disarmed }]
+        : this.config.arm_modes.map((m) => ({ mode: m, label: m.replace("_", " "), icon: ARM_MODE_ICONS[m] || "mdi:shield-lock" }));
       return `
         <div class="overlay">
           <div class="overlay-close" id="overlay-close">${ha("mdi:close", { size: 22 })}</div>
-          <div class="overlay-title">Arm System</div>
+          <div class="overlay-title">${isDisarm ? "Disarm System" : "Arm System"}</div>
           <div class="arm-choice-btns">
-            ${this.config.arm_modes.map((m) => `
-              <div class="arm-choice-btn" data-mode="${m}">
-                ${ha(ARM_MODE_ICONS[m] || "mdi:shield-lock", { size: 26 })}
-                <span>${m.replace("_", " ")}</span>
+            ${tiles.map((t) => `
+              <div class="arm-choice-btn ${isDisarm ? "tile-disarm" : "tile-arm"}" data-mode="${t.mode}">
+                ${ha(t.icon, { size: 26, color: isDisarm ? "#4caf1c" : "#e53935" })}
+                <span>${t.label}</span>
               </div>
             `).join("")}
           </div>
@@ -487,6 +518,25 @@ class SmartAlarmCard extends HTMLElement {
               <span class="row-state">${this._hass.states[this.config.lock.entity]?.state || ""}</span>
             </div>
           ` : `<div class="empty-msg">No locks configured</div>`}
+        </div>
+      `;
+    }
+    if (this._overlay === "lock-confirm") {
+      const entityId = this._pendingLock;
+      const locked = this._hass.states[entityId]?.state === "locked";
+      const action = locked ? "Unlock" : "Lock";
+      const name = this.config.lock?.name || "this lock";
+      const icon = locked ? "mdi:lock-open-outline" : "mdi:lock-outline";
+      return `
+        <div class="overlay">
+          <div class="overlay-close" id="overlay-close">${ha("mdi:close", { size: 22 })}</div>
+          <div class="overlay-title">${action} ${name}?</div>
+          <div class="arm-choice-btns">
+            <div class="arm-choice-btn danger" id="lock-confirm-btn">
+              ${ha(icon, { size: 24 })}
+              <span>${action}</span>
+            </div>
+          </div>
         </div>
       `;
     }
@@ -601,6 +651,8 @@ class SmartAlarmCard extends HTMLElement {
         cursor: pointer; text-transform: capitalize;
       }
       .arm-choice-btn.danger { background: rgba(229,57,53,0.25); border-color: #e53935; flex-direction: row; }
+      .arm-choice-btn.tile-arm { background: rgba(229,57,53,0.18); border-color: #e53935; }
+      .arm-choice-btn.tile-disarm { background: rgba(76,175,28,0.18); border-color: #4caf1c; }
       .arm-choice-btn:active { background: rgba(255,255,255,0.18); }
       .pin-dots { display: flex; gap: 10px; margin-bottom: 20px; height: 14px; }
       .pin-dot { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,0.5); }
@@ -636,14 +688,19 @@ class SmartAlarmCard extends HTMLElement {
     });
     root.getElementById("emergency-confirm")?.addEventListener("click", () => this._triggerEmergency());
     root.getElementById("overlay-close")?.addEventListener("click", () => this._closeOverlay());
-    root.getElementById("lock-row")?.addEventListener("click", () => this._toggleLock(this.config.lock.entity));
+    root.getElementById("lock-row")?.addEventListener("click", () => this._confirmLock(this.config.lock.entity));
+    root.getElementById("lock-confirm-btn")?.addEventListener("click", () => this._toggleLockConfirmed());
     root.getElementById("keypad-backspace")?.addEventListener("click", () => this._keypadBackspace());
     root.getElementById("keypad-clear")?.addEventListener("click", () => this._closeOverlay());
 
     root.querySelectorAll("[data-mode]").forEach((el) => {
       el.addEventListener("click", () => {
         const mode = el.getAttribute("data-mode");
-        this._startAction(ARM_SERVICE[mode]);
+        if (mode === "disarm") {
+          this._startAction("alarm_disarm");
+        } else {
+          this._startAction(ARM_SERVICE[mode]);
+        }
       });
     });
     root.querySelectorAll("[data-digit]").forEach((el) => {
@@ -664,5 +721,5 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "smart-alarm-card",
   name: "Smart Alarm Card",
-  description: "A Control4-style security panel card with Status/Zones/History tabs, Emergency and Locks buttons, real MDI icons, and an on-card PIN keypad.",
+  description: "A Home Assistant alarm card styled for a more modern looking security panel, featuring a dark title bar, Status/Zones/History tabs, a large Arm/Disarm ring button, Emergency function, Lock buttons, and an on-card PIN keypad.",
 });

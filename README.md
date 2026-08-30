@@ -1,8 +1,9 @@
 # Smart Alarm Card
 
-A Home Assistant Lovelace card styled after the Control4 security panel: a dark
-title bar, **Status / Zones / History** tabs, a large arm/disarm ring button,
-**Emergency** and **Functions** buttons, and an on-card PIN keypad.
+A Home Assistant alarm card styled for a more modern looking security panel,
+featuring a dark title bar, **Status / Zones / History** tabs, a large
+Arm/Disarm ring button, Emergency function, Lock buttons, and an on-card
+PIN keypad.
 
 ![screenshot](screenshot.png)
 
