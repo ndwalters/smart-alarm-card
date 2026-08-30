@@ -4,8 +4,10 @@
  * A custom Lovelace card styled after the Control4 security panel:
  * a dark full-bleed panel with a title bar, a Status / Zones / History
  * tab strip, a large circular arm/disarm button with a colour-coded
- * ring, an Emergency button, a Functions button (door lock control),
- * and an on-card PIN keypad.
+ * ring, an Emergency button, a Locks button, and an on-card PIN keypad.
+ *
+ * All icons are real Material Design Icons rendered via <ha-icon>,
+ * which is already available globally inside the Home Assistant frontend.
  *
  * INSTALL:
  * 1. Copy this file to <config>/www/smart-alarm-card.js
@@ -16,7 +18,7 @@
  *
  * EXAMPLE CONFIG:
  * type: custom:smart-alarm-card
- * entity: alarm_control_panel.home_alarm
+ * entity: alarm_control_panel.house
  * name: Security System
  * require_code: true
  * code_length: 4
@@ -24,25 +26,19 @@
  *   - away
  *   - home
  * zones:
- *   - entity: binary_sensor.front_door
+ *   - entity: binary_sensor.reed1_front_door
  *     name: Front Door
- *   - entity: binary_sensor.back_door
- *     name: Back Door
+ *     type: door
+ *     icon: mdi:door
+ *   - entity: binary_sensor.pir1_living_room
+ *     name: Living Room
+ *     type: motion
+ *     icon: mdi:motion-sensor
  * lock:
- *   entity: lock.front_door
- *   name: Front Door Lock
+ *   entity: lock.garage_door_lock
+ *   name: Garage Door Lock
+ *   icon: mdi:garage
  */
-
-const ICONS = {
-  lockOpenBig: `<svg viewBox="0 0 24 24"><path d="M12 17a2 2 0 0 0 2-2 2 2 0 0 0-2-2 2 2 0 0 0-2 2 2 2 0 0 0 2 2zm6-9h-9V6a3 3 0 0 1 5.83-1h2.13A5 5 0 0 0 7 6v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2z"/></svg>`,
-  lockClosedBig: `<svg viewBox="0 0 24 24"><path d="M12 17a2 2 0 0 0 2-2 2 2 0 0 0-2-2 2 2 0 0 0-2 2 2 2 0 0 0 2 2zm6-9h-1V6a5 5 0 0 0-10 0v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2zM8.9 6a3.1 3.1 0 0 1 6.2 0v2H8.9V6z"/></svg>`,
-  alert: `<svg viewBox="0 0 24 24"><path d="M12 2L1 21h22L12 2zm0 3.99L19.53 19H4.47L12 5.99zM11 10v4h2v-4h-2zm0 6v2h2v-2h-2z"/></svg>`,
-  hamburger: `<svg viewBox="0 0 24 24"><path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/></svg>`,
-  lockClosed: `<svg viewBox="0 0 24 24"><path d="M12 17a2 2 0 0 0 2-2 2 2 0 0 0-2-2 2 2 0 0 0-2 2 2 2 0 0 0 2 2zm6-9h-1V6a5 5 0 0 0-10 0v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2zM8.9 6a3.1 3.1 0 0 1 6.2 0v2H8.9V6z"/></svg>`,
-  lockOpen: `<svg viewBox="0 0 24 24"><path d="M12 17a2 2 0 0 0 2-2 2 2 0 0 0-2-2 2 2 0 0 0-2 2 2 2 0 0 0 2 2zm6-9h-9V6a3 3 0 0 1 5.83-1h2.13A5 5 0 0 0 7 6v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2z"/></svg>`,
-  backspace: `<svg viewBox="0 0 24 24"><path d="M22 3H7c-.69 0-1.23.35-1.59.88L0 12l5.41 8.11c.36.53.9.89 1.59.89h15a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-4.59 12.59L16 17l-3-3-3 3-1.41-1.41L11.59 12 8.59 9 10 7.59l3 3 3-3L17.41 9 14.41 12l3 3z"/></svg>`,
-  close: `<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>`,
-};
 
 const ARM_LABELS = {
   armed_home: "Armed Home",
@@ -60,12 +56,26 @@ const ARM_SERVICE = {
   custom_bypass: "alarm_arm_custom_bypass",
 };
 
+// Default icon + active/inactive labels per zone type
+const ZONE_TYPES = {
+  door: { icon: "mdi:door", activeLabel: "Open", inactiveLabel: "Closed" },
+  window: { icon: "mdi:window-closed-variant", activeLabel: "Open", inactiveLabel: "Closed" },
+  motion: { icon: "mdi:motion-sensor", activeLabel: "Motion", inactiveLabel: "Clear" },
+};
+
+function ha(iconStr, opts = {}) {
+  const size = opts.size || 24;
+  const color = opts.color || "currentColor";
+  const extra = opts.style || "";
+  return `<ha-icon icon="${iconStr}" style="--mdc-icon-size:${size}px; color:${color}; ${extra}"></ha-icon>`;
+}
+
 class SmartAlarmCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
     this._tab = "status"; // status | zones | history
-    this._overlay = null; // null | 'arm-select' | 'keypad' | 'emergency' | 'functions'
+    this._overlay = null; // null | 'arm-select' | 'keypad' | 'emergency' | 'locks'
     this._enteredCode = "";
     this._pendingService = null;
     this._error = false;
@@ -83,7 +93,7 @@ class SmartAlarmCard extends HTMLElement {
       require_code: config.require_code !== false,
       code_length: config.code_length || 4,
       arm_modes: config.arm_modes || ["away", "home"],
-      zones: config.zones || [],
+      zones: (config.zones || []).map((z) => ({ type: "door", ...z })),
       lock: config.lock || null,
       ...config,
     };
@@ -126,6 +136,14 @@ class SmartAlarmCard extends HTMLElement {
     if (state === "pending" || state === "arming" || state === "disarming") return "#ffa726";
     if (state.startsWith("armed_")) return "#e53935";
     return "#666";
+  }
+
+  _ringIcon(state) {
+    if (state === "disarmed") return "mdi:lock-open-outline";
+    if (state === "triggered") return "mdi:alert-outline";
+    if (state === "pending" || state === "arming" || state === "disarming") return "mdi:timer-lock-outline";
+    if (state && state.startsWith("armed_")) return "mdi:lock-outline";
+    return "mdi:lock-question";
   }
 
   _statusText(state) {
@@ -262,9 +280,8 @@ class SmartAlarmCard extends HTMLElement {
     const stateObj = this._stateObj();
     const state = stateObj?.state;
     const ring = this._ringColor(state);
-    const triggered = state === "triggered";
     const pending = state === "pending" || state === "arming" || state === "disarming";
-    const icon = state === "disarmed" ? ICONS.lockOpenBig : ICONS.lockClosedBig;
+    const triggered = state === "triggered";
 
     this.shadowRoot.innerHTML = `
       <style>${this._css(ring, pending, triggered)}</style>
@@ -276,7 +293,7 @@ class SmartAlarmCard extends HTMLElement {
           <div class="tab ${this._tab === "history" ? "active" : ""}" data-tab="history">History</div>
         </div>
         <div class="body">
-          ${this._tab === "status" ? this._renderStatus(state, ring, icon) : ""}
+          ${this._tab === "status" ? this._renderStatus(state, ring) : ""}
           ${this._tab === "zones" ? this._renderZones() : ""}
           ${this._tab === "history" ? this._renderHistory() : ""}
         </div>
@@ -286,20 +303,20 @@ class SmartAlarmCard extends HTMLElement {
     this._attachListeners();
   }
 
-  _renderStatus(state, ring, icon) {
+  _renderStatus(state, ring) {
     return `
       <div class="status-text" style="color:${ring}">${this._statusText(state)}</div>
       <div class="status-row">
         <div class="side-btn" id="emergency-btn">
-          <div class="side-icon">${ICONS.alert}</div>
+          <div class="side-icon">${ha("mdi:alert-octagon-outline", { size: 28 })}</div>
           <div class="side-label">Emergency</div>
         </div>
 
-        <div class="ring-btn" id="ring-btn">${icon}</div>
+        <div class="ring-btn" id="ring-btn">${ha(this._ringIcon(state), { size: 56 })}</div>
 
-        <div class="side-btn" id="functions-btn">
-          <div class="side-icon">${ICONS.hamburger}</div>
-          <div class="side-label">Functions</div>
+        <div class="side-btn" id="locks-btn">
+          <div class="side-icon">${ha("mdi:lock-outline", { size: 28 })}</div>
+          <div class="side-label">Locks</div>
         </div>
       </div>
       <div class="last-message">${this._lastMessage || ""}</div>
@@ -314,14 +331,17 @@ class SmartAlarmCard extends HTMLElement {
       <div class="zone-list">
         ${this.config.zones.map((z, i) => {
           const zs = this._hass.states[z.entity];
-          const isOpen = zs?.state === "on";
+          const typeInfo = ZONE_TYPES[z.type] || ZONE_TYPES.door;
+          const isActive = zs?.state === "on";
+          const icon = z.icon || typeInfo.icon;
+          const color = isActive ? "#e53935" : "#4caf1c";
           return `
             <div class="row" data-zone-index="${i}">
               <div class="row-left">
-                <div class="dot ${isOpen ? "open" : ""}"></div>
+                ${ha(icon, { size: 22, color })}
                 <span class="row-name">${z.name || zs?.attributes?.friendly_name || z.entity}</span>
               </div>
-              <span class="row-state">${isOpen ? "Open" : "Closed"}</span>
+              <span class="row-state" style="color:${color}">${isActive ? typeInfo.activeLabel : typeInfo.inactiveLabel}</span>
             </div>
           `;
         }).join("")}
@@ -356,7 +376,7 @@ class SmartAlarmCard extends HTMLElement {
     if (this._overlay === "arm-select") {
       return `
         <div class="overlay">
-          <div class="overlay-close" id="overlay-close">${ICONS.close}</div>
+          <div class="overlay-close" id="overlay-close">${ha("mdi:close", { size: 22 })}</div>
           <div class="overlay-title">Arm System</div>
           <div class="arm-choice-btns">
             ${this.config.arm_modes.map((m) => `<div class="arm-choice-btn" data-mode="${m}">${m.replace("_", " ")}</div>`).join("")}
@@ -367,7 +387,7 @@ class SmartAlarmCard extends HTMLElement {
     if (this._overlay === "keypad") {
       return `
         <div class="overlay">
-          <div class="overlay-close" id="overlay-close">${ICONS.close}</div>
+          <div class="overlay-close" id="overlay-close">${ha("mdi:close", { size: 22 })}</div>
           <div class="pin-dots ${this._error ? "error" : ""}">
             ${Array.from({ length: this.config.code_length }).map((_, i) =>
               `<div class="pin-dot ${i < this._enteredCode.length ? "filled" : ""}"></div>`
@@ -376,9 +396,9 @@ class SmartAlarmCard extends HTMLElement {
           <div class="keypad-error">${this._error ? "INCORRECT CODE" : ""}</div>
           <div class="keypad">
             ${[1,2,3,4,5,6,7,8,9].map((n) => `<div class="key" data-digit="${n}">${n}</div>`).join("")}
-            <div class="key fn" id="keypad-clear">${ICONS.close}</div>
+            <div class="key fn" id="keypad-clear">${ha("mdi:close-circle-outline", { size: 20 })}</div>
             <div class="key" data-digit="0">0</div>
-            <div class="key fn" id="keypad-backspace">${ICONS.backspace}</div>
+            <div class="key fn" id="keypad-backspace">${ha("mdi:backspace-outline", { size: 20 })}</div>
           </div>
         </div>
       `;
@@ -386,7 +406,7 @@ class SmartAlarmCard extends HTMLElement {
     if (this._overlay === "emergency") {
       return `
         <div class="overlay">
-          <div class="overlay-close" id="overlay-close">${ICONS.close}</div>
+          <div class="overlay-close" id="overlay-close">${ha("mdi:close", { size: 22 })}</div>
           <div class="overlay-title">Send Panic Alert?</div>
           <div class="arm-choice-btns">
             <div class="arm-choice-btn danger" id="emergency-confirm">Trigger Alarm</div>
@@ -394,22 +414,25 @@ class SmartAlarmCard extends HTMLElement {
         </div>
       `;
     }
-    if (this._overlay === "functions") {
+    if (this._overlay === "locks") {
       return `
         <div class="overlay">
-          <div class="overlay-close" id="overlay-close">${ICONS.close}</div>
-          <div class="overlay-title">Functions</div>
+          <div class="overlay-close" id="overlay-close">${ha("mdi:close", { size: 22 })}</div>
+          <div class="overlay-title">Locks</div>
           ${this.config.lock ? `
             <div class="row" id="lock-row" style="width:220px;">
               <div class="row-left">
-                <span class="lock-icon ${this._hass.states[this.config.lock.entity]?.state === "locked" ? "locked" : "unlocked"}">
-                  ${this._hass.states[this.config.lock.entity]?.state === "locked" ? ICONS.lockClosed : ICONS.lockOpen}
-                </span>
+                ${(() => {
+                  const locked = this._hass.states[this.config.lock.entity]?.state === "locked";
+                  const icon = this.config.lock.icon || (locked ? "mdi:lock-outline" : "mdi:lock-open-outline");
+                  const color = locked ? "#4caf1c" : "#e53935";
+                  return ha(icon, { size: 24, color });
+                })()}
                 <span class="row-name">${this.config.lock.name || "Door Lock"}</span>
               </div>
               <span class="row-state">${this._hass.states[this.config.lock.entity]?.state || ""}</span>
             </div>
-          ` : `<div class="empty-msg">No functions configured</div>`}
+          ` : `<div class="empty-msg">No locks configured</div>`}
         </div>
       `;
     }
@@ -466,9 +489,8 @@ class SmartAlarmCard extends HTMLElement {
         background: rgba(255,255,255,0.08);
         display: flex; align-items: center; justify-content: center;
         margin-bottom: 8px;
+        color: #fff;
       }
-      .side-icon svg { width: 28px; height: 28px; fill: none; stroke: #fff; stroke-width: 0; }
-      .side-icon svg path { fill: #fff; }
       .side-label { font-size: 13px; color: rgba(255,255,255,0.85); }
       .ring-btn {
         width: 176px;
@@ -479,6 +501,7 @@ class SmartAlarmCard extends HTMLElement {
         display: flex; align-items: center; justify-content: center;
         cursor: pointer;
         flex-shrink: 0;
+        color: #fff;
         ${pending ? "animation: pulse 1.1s ease-in-out infinite;" : ""}
         ${triggered ? "animation: flash 0.6s ease-in-out infinite;" : ""}
       }
@@ -490,7 +513,6 @@ class SmartAlarmCard extends HTMLElement {
         0%, 100% { border-color: #e53935; }
         50% { border-color: #7a1f1c; }
       }
-      .ring-btn svg { width: 60px; height: 60px; fill: #fff; }
       .last-message { text-align: center; font-size: 15px; color: rgba(255,255,255,0.75); margin-top: 26px; }
       .empty-msg { text-align: center; color: rgba(255,255,255,0.4); padding: 40px 0; }
 
@@ -500,14 +522,9 @@ class SmartAlarmCard extends HTMLElement {
         padding: 10px 4px; cursor: pointer;
       }
       .row:hover { background: rgba(255,255,255,0.04); }
-      .row-left { display: flex; align-items: center; gap: 10px; }
+      .row-left { display: flex; align-items: center; gap: 12px; }
       .row-name { font-size: 15px; }
-      .row-state { font-size: 12px; opacity: 0.55; text-transform: uppercase; }
-      .dot { width: 10px; height: 10px; border-radius: 50%; background: #4caf1c; flex-shrink: 0; }
-      .dot.open { background: #e53935; }
-      .lock-icon svg { width: 24px; height: 24px; }
-      .lock-icon.locked svg { fill: #4caf1c; }
-      .lock-icon.unlocked svg { fill: #e53935; }
+      .row-state { font-size: 12px; opacity: 0.85; text-transform: uppercase; }
 
       .history-row { display: flex; gap: 14px; padding: 9px 4px; border-bottom: 1px solid rgba(255,255,255,0.05); }
       .history-time { font-size: 12px; opacity: 0.5; width: 52px; flex-shrink: 0; }
@@ -519,8 +536,7 @@ class SmartAlarmCard extends HTMLElement {
         display: flex; flex-direction: column; align-items: center; justify-content: center;
         padding: 20px; z-index: 5;
       }
-      .overlay-close { position: absolute; top: 14px; right: 14px; cursor: pointer; opacity: 0.6; }
-      .overlay-close svg { width: 22px; height: 22px; fill: #fff; }
+      .overlay-close { position: absolute; top: 14px; right: 14px; cursor: pointer; opacity: 0.6; color: #fff; }
       .overlay-title { font-size: 15px; letter-spacing: 0.5px; opacity: 0.75; margin-bottom: 18px; }
       .arm-choice-btns { display: flex; gap: 12px; }
       .arm-choice-btn {
@@ -545,7 +561,7 @@ class SmartAlarmCard extends HTMLElement {
         cursor: pointer; user-select: none;
       }
       .key:active { background: rgba(255,255,255,0.2); }
-      .key.fn svg { width: 20px; height: 20px; fill: #fff; opacity: 0.7; }
+      .key.fn { opacity: 0.7; }
     `;
   }
 
@@ -559,8 +575,8 @@ class SmartAlarmCard extends HTMLElement {
       this._overlay = "emergency";
       this._render();
     });
-    root.getElementById("functions-btn")?.addEventListener("click", () => {
-      this._overlay = "functions";
+    root.getElementById("locks-btn")?.addEventListener("click", () => {
+      this._overlay = "locks";
       this._render();
     });
     root.getElementById("emergency-confirm")?.addEventListener("click", () => this._triggerEmergency());
@@ -593,5 +609,5 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "smart-alarm-card",
   name: "Smart Alarm Card",
-  description: "A Control4-style security panel card with Status/Zones/History tabs, Emergency and Functions buttons, and an on-card PIN keypad.",
+  description: "A Control4-style security panel card with Status/Zones/History tabs, Emergency and Locks buttons, real MDI icons, and an on-card PIN keypad.",
 });
