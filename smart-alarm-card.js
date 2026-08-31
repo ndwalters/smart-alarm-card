@@ -358,6 +358,7 @@ class SmartAlarmCard extends HTMLElement {
     const ring = this._ringColor(state);
     const pending = state === "pending" || state === "arming" || state === "disarming";
     const triggered = state === "triggered";
+    const anyZoneOpen = this.config.zones.some((z) => this._hass.states[z.entity]?.state === "on");
 
     this.shadowRoot.innerHTML = `
       <style>${this._css(ring, pending, triggered)}</style>
@@ -365,7 +366,9 @@ class SmartAlarmCard extends HTMLElement {
         <div class="titlebar">${this.config.name}</div>
         <div class="tabs">
           <div class="tab ${this._tab === "status" ? "active" : ""}" data-tab="status">Status</div>
-          <div class="tab ${this._tab === "zones" ? "active" : ""}" data-tab="zones">Zones</div>
+          <div class="tab ${this._tab === "zones" ? "active" : ""}" data-tab="zones">
+            Zones${anyZoneOpen ? '<span class="tab-badge"></span>' : ""}
+          </div>
           <div class="tab ${this._tab === "history" ? "active" : ""}" data-tab="history">History</div>
         </div>
         <div class="body">
@@ -532,7 +535,7 @@ class SmartAlarmCard extends HTMLElement {
           <div class="overlay-close" id="overlay-close">${ha("mdi:close", { size: 22 })}</div>
           <div class="overlay-title">${action} ${name}?</div>
           <div class="arm-choice-btns">
-            <div class="arm-choice-btn danger" id="lock-confirm-btn">
+            <div class="arm-choice-btn" id="lock-confirm-btn">
               ${ha(icon, { size: 24 })}
               <span>${action}</span>
             </div>
@@ -570,11 +573,21 @@ class SmartAlarmCard extends HTMLElement {
         border-bottom: 1px solid rgba(255,255,255,0.06);
       }
       .tab {
+        position: relative;
         font-size: 15px;
         color: rgba(255,255,255,0.45);
         cursor: pointer;
       }
       .tab.active { color: #fff; font-weight: 600; }
+      .tab-badge {
+        position: absolute;
+        top: -3px;
+        right: -9px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #e53935;
+      }
       .body { padding: 26px 20px 22px; min-height: 260px; }
       .status-text {
         text-align: center;
